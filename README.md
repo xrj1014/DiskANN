@@ -111,3 +111,110 @@ Please cite this software in your work as:
    year = {2023}
 }
 ```
+
+
+# DiskANN 实验指南
+
+
+
+## 前置条件
+
+1. Linux系统：Ubuntu 20.04 or newer
+
+
+
+## DiskANN的下载与安装
+
+### 下载
+
+参考资料：[microsoft/DiskANN: Graph-structured Indices for Scalable, Fast, Fresh and Filtered Approximate Nearest Neighbor Search](https://github.com/microsoft/DiskANN)
+
+首先使用apt安装DiskANN所需要的第三方包：
+
+```bash
+sudo apt install make cmake g++ libaio-dev libgoogle-perftools-dev clang-format libboost-all-dev
+sudo apt install libmkl-full-dev
+```
+
+使用git克隆DiskANN库
+
+```bash
+git clone https://github.com/microsoft/DiskANN.git
+```
+
+如果还没有git，可以运行`sudo apt install git`进行安装。
+
+### 构建
+
+进入DiskANN目录，执行以下命令：
+
+```bash
+mkdir build # 创建build目录，编译构建的所有生成的东西都会在这个build里面
+cd build 
+cmake -DCMAKE_BUILD_TYPE=Release .. # 执行cmake 进行make的前置工作
+make -j # 编译DiskANN代码并生成各种可执行文件
+```
+
+
+
+==生成的程序都在DiskANN/build/apps目录中==
+
+
+
+
+
+## 使用DiskANN运行测试例子
+
+### sift1M
+
+参考资料：[DiskANN/workflows/SSD_index.md at main · microsoft/DiskANN](https://github.com/microsoft/DiskANN/blob/main/workflows/SSD_index.md)
+
+#### 数据集的下载与前置准备
+
+```bash
+mkdir -p DiskANN/build/data #创建data目录用于存放数据集
+cd DiskANN/build/data #进入目录
+wget ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz # wget命令用于下载数据集sift.tar.gz
+tar -xf sift.tar.gz # 解压缩，到sift目录
+cd .. #进入build目录
+```
+
+==数据集的样子==
+
+接下来，利用DiskANN中自带的`fvecs_to_bin`程序，将数据集中的fvecs文件转换为DiskANN所需要的fbin文件。用法为：`[fvecs_to_bin]的位置 数据类型 源fvecs文件位置 目标fbin文件位置`
+
+```bash
+./apps/utils/fvecs_to_bin float data/sift/sift_learn.fvecs data/sift/sift_learn.fbin
+./apps/utils/fvecs_to_bin float data/sift/sift_query.fvecs data/sift/sift_query.fbin
+```
+
+为了测试召回率，我们首先需要groundtruth文件，存放query对应最近邻的正确答案。数据集中可能已经给定这个信息，但如果没有，DiskANN提供了`compute_groundtruth`程序用于生成groundtruth文件。
+
+```bash
+./apps/utils/compute_groundtruth  --data_type float --dist_fn l2 --base_file data/sift/sift_learn.fbin --query_file  data/sift/sift_query.fbin --gt_file data/sift/sift_query_learn_gt100 --K 100
+```
+
+选项：
+
+* `--data_type`：类型
+* `--dist_fn`：距离的定义方式
+* `--base_file`：用于搜索最近邻的数据集
+* `--query_file`：query，搜索这些点的最近邻
+* `--gt_file`：生成GT文件的位置
+* `--K`：对于每个query，生成K个最近邻
+
+
+
+接下来就可以正式进行build and search。首先是build：
+
+```bash
+# Using 0.003GB search memory budget for 100K vectors implies 32 byte PQ compression
+./apps/build_disk_index --data_type float --dist_fn l2 --data_path data/sift/sift_learn.fbin --index_path_prefix data/sift/disk_index_sift_learn_R32_L50_A1.2 -R 32 -L50 -B 0.003 -M 1
+```
+
+
+
+```bash
+./apps/search_disk_index  --data_type float --dist_fn l2 --index_path_prefix data/sift/disk_index_sift_learn_R32_L50_A1.2 --query_file data/sift/sift_query.fbin  --gt_file data/sift/sift_query_learn_gt100 -K 10 -L 10 20 30 40 50 100 --result_path data/sift/res --num_nodes_to_cache 10000
+```
+
