@@ -139,7 +139,7 @@ sudo apt install libmkl-full-dev
 使用git克隆DiskANN库
 
 ```bash
-git clone https://github.com/microsoft/DiskANN.git
+git clone https://github.com/xrj1014/DiskANN.git
 ```
 
 如果还没有git，可以运行`sudo apt install git`进行安装。
@@ -155,13 +155,7 @@ cmake -DCMAKE_BUILD_TYPE=Release .. # 执行cmake 进行make的前置工作
 make -j # 编译DiskANN代码并生成各种可执行文件
 ```
 
-
-
-==生成的程序都在DiskANN/build/apps目录中==
-
-
-
-
+如果命令执行成功，DiskANN程序就已经构建完成。实际使用的程序均在`DiskANN/build/apps`目录中。
 
 ## 使用DiskANN运行测试例子
 
@@ -169,52 +163,91 @@ make -j # 编译DiskANN代码并生成各种可执行文件
 
 参考资料：[DiskANN/workflows/SSD_index.md at main · microsoft/DiskANN](https://github.com/microsoft/DiskANN/blob/main/workflows/SSD_index.md)
 
+（这里我们的命令略有不同，主要是因为文件放置的目录不同~）
+
 #### 数据集的下载与前置准备
 
+首先我们在DiskANN目录下创建一个data目录，里面存放数据集以及所有程序运行中生成的临时文件。
+
+确保自己在DiskANN目录下，然后
+
 ```bash
-mkdir -p DiskANN/build/data #创建data目录用于存放数据集
-cd DiskANN/build/data #进入目录
-wget ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz # wget命令用于下载数据集sift.tar.gz
-tar -xf sift.tar.gz # 解压缩，到sift目录
-cd .. #进入build目录
+mkdir -p data #创建data目录用于存放数据集
+cd data #进入data目录
 ```
 
-==数据集的样子==
-
-接下来，利用DiskANN中自带的`fvecs_to_bin`程序，将数据集中的fvecs文件转换为DiskANN所需要的fbin文件。用法为：`[fvecs_to_bin]的位置 数据类型 源fvecs文件位置 目标fbin文件位置`
+把sift1m数据集下载到当前目录下，并且解压缩。
 
 ```bash
-./apps/utils/fvecs_to_bin float data/sift/sift_learn.fvecs data/sift/sift_learn.fbin
-./apps/utils/fvecs_to_bin float data/sift/sift_query.fvecs data/sift/sift_query.fbin
+wget ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz # “wget 文件链接” 即可下载对应文件
+tar -xf sift.tar.gz # 解压缩，此时会多一个sift目录
 ```
 
-为了测试召回率，我们首先需要groundtruth文件，存放query对应最近邻的正确答案。数据集中可能已经给定这个信息，但如果没有，DiskANN提供了`compute_groundtruth`程序用于生成groundtruth文件。
+sift目录长成这个样子：
 
 ```bash
-./apps/utils/compute_groundtruth  --data_type float --dist_fn l2 --base_file data/sift/sift_learn.fbin --query_file  data/sift/sift_query.fbin --gt_file data/sift/sift_query_learn_gt100 --K 100
+sift
+├── sift_base.fvecs
+├── sift_groundtruth.ivecs
+├── sift_learn.fvecs
+└── sift_query.fvecs
+```
+
+它包含了四个文件，从文件名中可以看出每个文件的用途。其中`.ivecs`和`.fvecs`是数据集的格式，f表示`float`类型，i表示`int`类型。可以看出，sift1m数据集中的base数据类型是`float`。Groundtruth文件中存放的是索引，所以是整型。在接下来的过程中，我们只需要用到learn和query文件。
+
+接下来，我们进行数据的预处理。DiskANN的程序接受的输入是binary文件，因此我们首先需要将`fvecs`文件转化为二进制文件。这一步骤可以利用DiskANN中自带的`fvecs_to_bin`程序进行。用法为：`[fvecs_to_bin]的位置 数据类型 源fvecs文件位置 目标fbin文件位置`。比如，首先`进入DiskANN主目录`（如果你在子目录下，可用`cd ..`到达上一层目录），然后执行
+
+```bash
+./build/apps/utils/fvecs_to_bin float data/sift/sift_learn.fvecs data/sift/sift_learn.fbin
+./build/apps/utils/fvecs_to_bin float data/sift/sift_query.fvecs data/sift/sift_query.fbin
+```
+
+然后我们准备groundtruth文件，存放query对应最近邻的正确答案，这样才能在后面测试召回率。虽然数据集中已经给定groundtruth，但DiskANN也提供了`compute_groundtruth`程序用于计算groundtruth文件。执行以下命令（注意，这是一行），基于`learn`数据，计算`query`中的每个点的100个最近邻，存放到新文件`data/sift/sift_query_learn_gt100`中。
+
+```bash
+./build/apps/utils/compute_groundtruth  --data_type float --dist_fn l2 --base_file data/sift/sift_learn.fbin --query_file  data/sift/sift_query.fbin --gt_file data/sift/sift_query_learn_gt100 --K 100
+```
+
+其中的选项：
+
+* `--data_type`：类型，这里是float
+* `--dist_fn`：距离的定义方式，这里是l2
+* `--base_file`：用于搜索最近邻的数据集，这里是learn文件
+* `--query_file`：query，搜索这些点的最近邻，这里是query文件
+* `--gt_file`：生成GT文件的位置
+* `--K`：对于每个query，生成K个最近邻，这里是100
+
+【请注意！！！】这里的groundtruth是基于learn数据生成的，而非base。而后面的build index过程同样也是基于learn数据集。这两个大小没有差别。也就是说，base数据集似乎从头到尾就没有用上。
+
+接下来就可以正式进行build and search。首先是build index：（这是一行）
+
+```bash
+# Using 0.003GB search memory budget for 100K vectors implies 32 byte PQ compression
+./build/apps/build_disk_index --data_type float --dist_fn l2 --data_path data/sift/sift_learn.fbin --index_path_prefix data/sift/disk_index_sift_learn_R32_L50_A1.2 -R 32 -L50 -B 0.003 -M 1 -A 1.2
 ```
 
 选项：
 
-* `--data_type`：类型
-* `--dist_fn`：距离的定义方式
-* `--base_file`：用于搜索最近邻的数据集
-* `--query_file`：query，搜索这些点的最近邻
-* `--gt_file`：生成GT文件的位置
-* `--K`：对于每个query，生成K个最近邻
+* `data_type`：同上
+* `dist_fn`：同上
+* `data_path`：用于建立索引的数据文件
+* `index_path_prefix`：生成索引文件的前缀
+* `R`：max degree
+* `L`：搜索列表
+* `B`：search时用到的最大内存（单位为GB）
+* `M`：build时用到的最大内存
+* `A`：alpha
 
+请注意，这里是alpha是新增的参数，源代码中没有。详细的参数说明可见[DiskANN/workflows/SSD_index.md at main · xrj1014/DiskANN](https://github.com/xrj1014/DiskANN/blob/main/workflows/SSD_index.md#to-generate-an-ssd-friendly-index-use-the-appsbuild_disk_index-program)。
 
-
-接下来就可以正式进行build and search。首先是build：
+建立完索引之后，就可以进行搜索测试。接下来这条命令，是使用生成的index文件（以`data/sift/disk_index_sift_learn_R32_L50_A1.2`为前缀），分别在search list 为 10，20，30，40，50，100的情形下测试K-recall@K（这里K=10），并将结果存至以`data/sift/res`为前缀的文件中。详细参数说明见[DiskANN/workflows/SSD_index.md at main · xrj1014/DiskANN](https://github.com/xrj1014/DiskANN/blob/main/workflows/SSD_index.md#to-search-the-ssd-index-use-the-appssearch_disk_index-program)。
 
 ```bash
-# Using 0.003GB search memory budget for 100K vectors implies 32 byte PQ compression
-./apps/build_disk_index --data_type float --dist_fn l2 --data_path data/sift/sift_learn.fbin --index_path_prefix data/sift/disk_index_sift_learn_R32_L50_A1.2 -R 32 -L50 -B 0.003 -M 1
+./build/apps/search_disk_index  --data_type float --dist_fn l2 --index_path_prefix data/sift/disk_index_sift_learn_R32_L50_A1.2 --query_file data/sift/sift_query.fbin  --gt_file data/sift/sift_query_learn_gt100 -K 10 -L 10 20 30 40 50 100 --result_path data/sift/res --num_nodes_to_cache 10000
 ```
 
 
 
-```bash
-./apps/search_disk_index  --data_type float --dist_fn l2 --index_path_prefix data/sift/disk_index_sift_learn_R32_L50_A1.2 --query_file data/sift/sift_query.fbin  --gt_file data/sift/sift_query_learn_gt100 -K 10 -L 10 20 30 40 50 100 --result_path data/sift/res --num_nodes_to_cache 10000
-```
+### sift1B
 
+待更新
